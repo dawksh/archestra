@@ -84,6 +84,7 @@ const toolRoutes: FastifyPluginAsyncZod = async (fastify) => {
         },
         userId: user.id,
         isAgentAdmin,
+        organizationId,
       });
 
       return reply.send(result);

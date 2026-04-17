@@ -7,6 +7,9 @@ import { z } from "zod";
 import { schema } from "@/database";
 import { InternalMcpCatalogServerTypeSchema } from "./mcp-catalog";
 
+export const McpServerScopeSchema = z.enum(["personal", "team", "org"]);
+export type McpServerScope = z.infer<typeof McpServerScopeSchema>;
+
 export const LocalMcpServerInstallationStatusSchema = z.enum([
   "idle",
   "pending",
@@ -28,6 +31,7 @@ export const SelectMcpServerSchema = createSelectSchema(
   schema.mcpServersTable,
 ).extend({
   serverType: InternalMcpCatalogServerTypeSchema,
+  scope: McpServerScopeSchema,
   ownerEmail: z.string().nullable().optional(),
   catalogName: z.string().nullable().optional(),
   users: z.array(z.string()).optional(),
@@ -55,6 +59,7 @@ export const SelectMcpServerSchema = createSelectSchema(
 export const InsertMcpServerSchema = createInsertSchema(schema.mcpServersTable)
   .extend({
     serverType: InternalMcpCatalogServerTypeSchema,
+    scope: McpServerScopeSchema.optional(),
     userId: z.string().optional(), // For personal auth
     localInstallationStatus: LocalMcpServerInstallationStatusSchema.optional(),
     userConfigValues: z.record(z.string(), z.string()).optional(),

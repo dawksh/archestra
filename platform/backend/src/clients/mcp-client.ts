@@ -708,6 +708,7 @@ class McpClient {
             if (
               targetServer?.ownerId &&
               !targetServer.teamId &&
+              targetServer.scope !== "org" &&
               tokenAuth?.userId !== targetServer.ownerId
             ) {
               const assignmentError =
@@ -1257,7 +1258,7 @@ class McpClient {
     if (tokenAuth.userId) {
       // Priority 1: Personal credential owned by current user
       const userServer = allServers.find(
-        (s) => s.ownerId === tokenAuth.userId && !s.teamId,
+        (s) => s.ownerId === tokenAuth.userId && !s.teamId && s.scope !== "org",
       );
       if (userServer) {
         logger.info(
@@ -1297,9 +1298,33 @@ class McpClient {
           mcpServerName: teamServer.name,
         };
       }
+
+      // Priority 3: Org-wide server in the user's organization
+      if (tokenAuth.organizationId) {
+        const orgServer = allServers.find(
+          (s) =>
+            s.scope === "org" && s.organizationId === tokenAuth.organizationId,
+        );
+        if (orgServer) {
+          logger.info(
+            {
+              toolName: toolCall.name,
+              catalogId: tool.catalogId,
+              serverId: orgServer.id,
+              organizationId: tokenAuth.organizationId,
+              userId: tokenAuth.userId,
+            },
+            `Dynamic resolution: using org-wide server for user ${tokenAuth.userId}`,
+          );
+          return {
+            targetMcpServerId: orgServer.id,
+            mcpServerName: orgServer.name,
+          };
+        }
+      }
     }
 
-    // Team token: only try team-owned servers for the token's team
+    // Team token: try team-owned server, then fall back to org-wide for the same org
     if (tokenAuth.teamId) {
       const teamServer = allServers.find((s) => s.teamId === tokenAuth.teamId);
       if (teamServer) {
@@ -1317,15 +1342,60 @@ class McpClient {
           mcpServerName: teamServer.name,
         };
       }
+
+      if (tokenAuth.organizationId) {
+        const orgServer = allServers.find(
+          (s) =>
+            s.scope === "org" && s.organizationId === tokenAuth.organizationId,
+        );
+        if (orgServer) {
+          logger.info(
+            {
+              toolName: toolCall.name,
+              catalogId: tool.catalogId,
+              serverId: orgServer.id,
+              teamId: tokenAuth.teamId,
+              organizationId: tokenAuth.organizationId,
+            },
+            `Dynamic resolution: using org-wide server for team ${tokenAuth.teamId}`,
+          );
+          return {
+            targetMcpServerId: orgServer.id,
+            mcpServerName: orgServer.name,
+          };
+        }
+      }
     }
 
-    // Org-wide token is incompatible with dynamic credential resolution
+    // Org-wide token: resolve to org-wide server in the same organization
     if (tokenAuth.isOrganizationToken) {
+      if (tokenAuth.organizationId) {
+        const orgServer = allServers.find(
+          (s) =>
+            s.scope === "org" && s.organizationId === tokenAuth.organizationId,
+        );
+        if (orgServer) {
+          logger.info(
+            {
+              toolName: toolCall.name,
+              catalogId: tool.catalogId,
+              serverId: orgServer.id,
+              organizationId: tokenAuth.organizationId,
+            },
+            `Dynamic resolution: using org-wide server for organization ${tokenAuth.organizationId}`,
+          );
+          return {
+            targetMcpServerId: orgServer.id,
+            mcpServerName: orgServer.name,
+          };
+        }
+      }
+
       return {
         error: await this.createErrorResult(
           toolCall,
           agentId,
-          "Organization-wide tokens are not supported for tools with dynamic credential resolution. Use a personal or team token instead.",
+          "No organization-wide MCP server installation found for this catalog. Install one as org-wide or use a personal/team token instead.",
           fallbackName,
         ),
       };

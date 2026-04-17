@@ -170,6 +170,9 @@ export function InternalMCPCatalog({
     null,
   );
   // Track the team ID of the server being reinstalled (to pre-select credential type)
+  const [reinstallServerScope, setReinstallServerScope] = useState<
+    "personal" | "team" | "org" | null
+  >(null);
   const [reinstallServerTeamId, setReinstallServerTeamId] = useState<
     string | null
   >(null);
@@ -579,6 +582,7 @@ export function InternalMCPCatalog({
       name: catalogItem.name,
       catalogId: catalogItem.id,
       teamId: result.teamId ?? undefined,
+      scope: result.scope,
     });
     closeDialog("no-auth");
     setNoAuthCatalogItem(null);
@@ -662,6 +666,7 @@ export function InternalMCPCatalog({
       setLocalServerCatalogItem(null);
       setReinstallServerId(null);
       setReinstallServerTeamId(null);
+      setReinstallServerScope(null);
 
       const serverIdToReinstall = reinstallServerId;
       try {
@@ -699,6 +704,7 @@ export function InternalMCPCatalog({
       userConfigValues: installResult.userConfigValues,
       isByosVault: installResult.isByosVault,
       teamId: installResult.teamId ?? undefined,
+      scope: installResult.scope,
       serviceAccount: installResult.serviceAccount,
       dontShowToast: true,
     });
@@ -767,6 +773,7 @@ export function InternalMCPCatalog({
       }),
       isByosVault: result.isByosVault,
       teamId: result.teamId ?? undefined,
+      scope: result.scope,
     });
     setInstallingItemId(null);
   };
@@ -902,6 +909,9 @@ export function InternalMCPCatalog({
         setLocalServerCatalogItem(catalogItem);
         setReinstallServerId(installedServer.id);
         setReinstallServerTeamId(installedServer.teamId ?? null);
+        setReinstallServerScope(
+          (installedServer.scope as "personal" | "team" | "org" | null) ?? null,
+        );
         openDialog("local-install");
       } else {
         // No prompted env vars - still confirm before reinstalling
@@ -1387,6 +1397,7 @@ export function InternalMCPCatalog({
             setLocalServerCatalogItem(null);
             setReinstallServerId(null);
             setReinstallServerTeamId(null);
+            setReinstallServerScope(null);
             setReauthServerId(null);
             setPreselectedTeamId(null);
             setInstallPersonalOnly(false);
@@ -1400,6 +1411,7 @@ export function InternalMCPCatalog({
           }
           isReinstall={!!reinstallServerId}
           existingTeamId={reinstallServerTeamId}
+          existingScope={reinstallServerScope}
           isReauth={!!reauthServerId}
           preselectedTeamId={preselectedTeamId}
           personalOnly={installPersonalOnly}

@@ -1788,6 +1788,7 @@ class ToolModel {
     filters?: ToolFilters;
     userId?: string;
     isAgentAdmin?: boolean;
+    organizationId?: string;
   }): Promise<PaginatedResult<ToolWithAssignments>> {
     const {
       pagination = { limit: 20, offset: 0 },
@@ -1795,6 +1796,7 @@ class ToolModel {
       filters,
       userId,
       isAgentAdmin,
+      organizationId,
     } = params;
 
     // Build WHERE conditions for tools
@@ -1855,7 +1857,7 @@ class ToolModel {
     if (userId && !isAgentAdmin) {
       const [agentIds, mcpServers] = await Promise.all([
         AgentTeamModel.getUserAccessibleAgentIds(userId, false),
-        McpServerModel.findAll(userId, false),
+        McpServerModel.findAll(userId, false, organizationId),
       ]);
       accessibleAgentIds = agentIds;
       accessibleMcpServerIds = new Set(mcpServers.map((s) => s.id));

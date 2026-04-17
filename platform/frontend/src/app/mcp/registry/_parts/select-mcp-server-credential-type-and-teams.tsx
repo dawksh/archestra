@@ -20,17 +20,22 @@ import { useMcpServers } from "@/lib/mcp/mcp-server.query";
 import { useTeams } from "@/lib/teams/team.query";
 
 const PERSONAL_VALUE = "personal";
+const ORG_VALUE = "org";
+
+export type McpServerCredentialScope = "personal" | "team" | "org";
 
 interface SelectMcpServerCredentialTypeAndTeamsProps {
   onTeamChange: (teamId: string | null) => void;
   /** Catalog ID to filter existing installations - if provided, disables already-used options */
   catalogId?: string;
-  /** Callback when credential type changes (personal vs team) */
-  onCredentialTypeChange?: (type: "personal" | "team") => void;
+  /** Callback when credential type changes (personal, team, or org) */
+  onCredentialTypeChange?: (type: McpServerCredentialScope) => void;
   /** When true, this is a reinstall - credential type is locked to existing value */
   isReinstall?: boolean;
   /** The team ID of the existing server being reinstalled (null/undefined = personal) */
   existingTeamId?: string | null;
+  /** The scope of the existing server being reinstalled (defaults to team/personal) */
+  existingScope?: McpServerCredentialScope | null;
   /** When true, only personal installation is allowed (teams are disabled) */
   personalOnly?: boolean;
   /** When true, only team installation is allowed (personal is disabled) */
@@ -47,6 +52,7 @@ export function SelectMcpServerCredentialTypeAndTeams({
   onCredentialTypeChange,
   isReinstall = false,
   existingTeamId,
+  existingScope,
   personalOnly = false,
   teamOnly = false,
   onCanInstallChange,
@@ -64,29 +70,43 @@ export function SelectMcpServerCredentialTypeAndTeams({
     mcpServerInstallation: ["update"],
   });
 
+  // WHY: Only admins can create organization-wide installations, so everyone in the
+  // organization can assign the server to agents/gateways.
+  const { data: hasMcpServerAdmin } = useHasPermissions({
+    mcpServerInstallation: ["admin"],
+  });
+
   // Compute existing installations for this catalog item
-  const { hasPersonalInstallation, teamsWithInstallation } = useMemo(() => {
-    if (!catalogId || !installedServers) {
-      return { hasPersonalInstallation: false, teamsWithInstallation: [] };
-    }
+  const { hasPersonalInstallation, teamsWithInstallation, hasOrgInstallation } =
+    useMemo(() => {
+      if (!catalogId || !installedServers) {
+        return {
+          hasPersonalInstallation: false,
+          teamsWithInstallation: [],
+          hasOrgInstallation: false,
+        };
+      }
 
-    const serversForCatalog = installedServers.filter(
-      (s) => s.catalogId === catalogId,
-    );
+      const serversForCatalog = installedServers.filter(
+        (s) => s.catalogId === catalogId,
+      );
 
-    const hasPersonal = serversForCatalog.some(
-      (s) => s.ownerId === currentUserId && !s.teamId,
-    );
+      const hasPersonal = serversForCatalog.some(
+        (s) => s.ownerId === currentUserId && !s.teamId && s.scope !== "org",
+      );
 
-    const teamsWithInstall = serversForCatalog
-      .filter((s): s is typeof s & { teamId: string } => !!s.teamId)
-      .map((s) => s.teamId);
+      const teamsWithInstall = serversForCatalog
+        .filter((s): s is typeof s & { teamId: string } => !!s.teamId)
+        .map((s) => s.teamId);
 
-    return {
-      hasPersonalInstallation: hasPersonal,
-      teamsWithInstallation: teamsWithInstall,
-    };
-  }, [catalogId, installedServers, currentUserId]);
+      const hasOrg = serversForCatalog.some((s) => s.scope === "org");
+
+      return {
+        hasPersonalInstallation: hasPersonal,
+        teamsWithInstallation: teamsWithInstall,
+        hasOrgInstallation: hasOrg,
+      };
+    }, [catalogId, installedServers, currentUserId]);
 
   // Filter available teams to exclude those that already have this server installed
   // For reinstall: include ALL teams (no filtering needed since we're updating, not creating)
@@ -109,16 +129,29 @@ export function SelectMcpServerCredentialTypeAndTeams({
 
   // WHY: Team options are disabled if:
   // 1. personalOnly mode (e.g. Playwright - only personal installs allowed)
-  // 2. Reinstalling a personal server (can't switch to team)
+  // 2. Reinstalling a personal/org server (can't switch to team)
   // 3. User lacks mcpServer:update permission (members can never create team installations)
   const areTeamsDisabled = personalOnly
     ? true
     : isReinstall
-      ? !existingTeamId // Reinstalling personal server - can't switch to team
+      ? existingScope !== "team"
       : !hasMcpServerUpdate;
 
-  // When both personal and team options are unavailable, user cannot install at all
-  const canInstall = !isPersonalDisabled || !areTeamsDisabled;
+  // WHY: Org-wide option is disabled if:
+  // 1. personalOnly or teamOnly mode
+  // 2. Reinstalling a non-org server (can't switch scope)
+  // 3. User is not a mcpServer:admin (only admins can create org-wide installs)
+  // 4. An org-wide installation already exists for this catalog item
+  const isOrgDisabled = personalOnly
+    ? true
+    : teamOnly
+      ? true
+      : isReinstall
+        ? existingScope !== "org"
+        : !hasMcpServerAdmin || hasOrgInstallation;
+
+  // When all install options are unavailable, user cannot install at all
+  const canInstall = !isPersonalDisabled || !areTeamsDisabled || !isOrgDisabled;
 
   useEffect(() => {
     onCanInstallChange?.(canInstall);
@@ -136,6 +169,7 @@ export function SelectMcpServerCredentialTypeAndTeams({
       return availableTeams[0].id;
     }
     if (isReinstall) {
+      if (existingScope === "org") return ORG_VALUE;
       return existingTeamId || PERSONAL_VALUE;
     }
     // Force team selection when personal is already installed
@@ -151,6 +185,7 @@ export function SelectMcpServerCredentialTypeAndTeams({
     availableTeams,
     isReinstall,
     existingTeamId,
+    existingScope,
   ]);
 
   const [selectedValue, setSelectedValue] = useState<string>(initialValue);
@@ -158,11 +193,17 @@ export function SelectMcpServerCredentialTypeAndTeams({
   // Sync when constraints change (e.g., data loads asynchronously)
   // Also notifies parent of the current credential type and team
   useEffect(() => {
+    const scopeFromValue: McpServerCredentialScope =
+      selectedValue === PERSONAL_VALUE
+        ? "personal"
+        : selectedValue === ORG_VALUE
+          ? "org"
+          : "team";
+
     // For reinstall, don't auto-switch - keep the existing value
     if (isReinstall) {
-      const isTeam = selectedValue !== PERSONAL_VALUE;
-      onCredentialTypeChange?.(isTeam ? "team" : "personal");
-      onTeamChange(isTeam ? selectedValue : null);
+      onCredentialTypeChange?.(scopeFromValue);
+      onTeamChange(scopeFromValue === "team" ? selectedValue : null);
       return;
     }
 
@@ -177,9 +218,8 @@ export function SelectMcpServerCredentialTypeAndTeams({
     }
 
     // Always notify parent of current state when dependencies change
-    const isTeam = selectedValue !== PERSONAL_VALUE;
-    onCredentialTypeChange?.(isTeam ? "team" : "personal");
-    onTeamChange(isTeam ? selectedValue : null);
+    onCredentialTypeChange?.(scopeFromValue);
+    onTeamChange(scopeFromValue === "team" ? selectedValue : null);
   }, [
     hasPersonalInstallation,
     availableTeams,
@@ -193,6 +233,9 @@ export function SelectMcpServerCredentialTypeAndTeams({
     setSelectedValue(value);
     if (value === PERSONAL_VALUE) {
       onCredentialTypeChange?.("personal");
+      onTeamChange(null);
+    } else if (value === ORG_VALUE) {
+      onCredentialTypeChange?.("org");
       onTeamChange(null);
     } else {
       onCredentialTypeChange?.("team");
@@ -254,6 +297,16 @@ export function SelectMcpServerCredentialTypeAndTeams({
               )}
             </SelectItem>
           )}
+          {!personalOnly && !teamOnly && (
+            <SelectItem value={ORG_VALUE} disabled={isOrgDisabled}>
+              Organization
+              {hasOrgInstallation && !isReinstall && (
+                <span className="text-muted-foreground ml-1">
+                  (already installed)
+                </span>
+              )}
+            </SelectItem>
+          )}
           {(isReinstall ? availableTeams : (teams ?? [])).length > 0 && (
             <SelectGroup>
               {!teamOnly && <SelectLabel>Teams</SelectLabel>}
@@ -282,7 +335,9 @@ export function SelectMcpServerCredentialTypeAndTeams({
       <p className="text-xs text-muted-foreground">
         {selectedValue === PERSONAL_VALUE
           ? "Only admins can select this connection when assigning tools to agents and MCP gateways - other users will not see it."
-          : "Any team member can select this connection when assigning tools to agents and MCP gateways."}
+          : selectedValue === ORG_VALUE
+            ? "Any user in the organization can select this connection when assigning tools to agents and MCP gateways."
+            : "Any team member can select this connection when assigning tools to agents and MCP gateways."}
       </p>
     </div>
   );

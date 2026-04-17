@@ -73,6 +73,8 @@ export interface LocalServerInstallResult {
   userConfigValues?: Record<string, string>;
   /** Team ID to assign the MCP server to (null for personal) */
   teamId?: string | null;
+  /** Installation scope: personal | team | org */
+  scope?: "personal" | "team" | "org";
   /** Whether environmentValues contains BYOS vault references in path#key format */
   isByosVault?: boolean;
   /** Kubernetes service account for the MCP server pod */
@@ -89,6 +91,8 @@ interface LocalServerInstallDialogProps {
   isReinstall?: boolean;
   /** The team ID of the existing server being reinstalled (null = personal) */
   existingTeamId?: string | null;
+  /** The scope of the existing server being reinstalled */
+  existingScope?: "personal" | "team" | "org" | null;
   /** When true, shows re-authentication mode (info banner, different title) */
   isReauth?: boolean;
   /** Pre-select a specific team in the credential type selector */
@@ -105,14 +109,15 @@ export function LocalServerInstallDialog({
   isInstalling,
   isReinstall = false,
   existingTeamId,
+  existingScope,
   isReauth = false,
   preselectedTeamId,
   personalOnly: personalOnlyProp = false,
 }: LocalServerInstallDialogProps) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-  const [credentialType, setCredentialType] = useState<"personal" | "team">(
-    "personal",
-  );
+  const [credentialType, setCredentialType] = useState<
+    "personal" | "team" | "org"
+  >("personal");
   const [canInstall, setCanInstall] = useState(true);
   const [serviceAccount, setServiceAccount] = useState<string | undefined>(
     catalogItem?.localConfig?.serviceAccount,
@@ -298,7 +303,8 @@ export function LocalServerInstallDialog({
     await onConfirm({
       environmentValues: finalEnvironmentValues,
       userConfigValues: finalUserConfigValues,
-      teamId: selectedTeamId,
+      teamId: credentialType === "team" ? selectedTeamId : null,
+      scope: credentialType,
       isByosVault:
         useVaultSecrets &&
         (secretEnvVars.length > 0 ||
@@ -480,6 +486,7 @@ export function LocalServerInstallDialog({
         onCanInstallChange={setCanInstall}
         isReinstall={isReinstall}
         existingTeamId={existingTeamId}
+        existingScope={existingScope ?? undefined}
         personalOnly={
           personalOnlyProp ||
           (catalogItem ? isPlaywrightCatalogItem(catalogItem.id) : false)

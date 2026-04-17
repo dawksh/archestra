@@ -144,6 +144,94 @@ describe("McpServerModel", () => {
       expect(found.userDetails).toHaveLength(0);
     });
 
+    test("includes org-wide servers for members of the same organization", async ({
+      makeMcpServer,
+      makeMember,
+      makeOrganization,
+      makeUser,
+    }) => {
+      const organization = await makeOrganization();
+      const member = await makeUser();
+      await makeMember(member.id, organization.id, { role: "member" });
+
+      const orgServer = await makeMcpServer({
+        scope: "org",
+        organizationId: organization.id,
+      });
+
+      const servers = await McpServerModel.findAll(
+        member.id,
+        false,
+        organization.id,
+      );
+
+      expect(servers.some((s) => s.id === orgServer.id)).toBe(true);
+    });
+
+    test("excludes org-wide servers from a different organization", async ({
+      makeMcpServer,
+      makeMember,
+      makeOrganization,
+      makeUser,
+    }) => {
+      const organization = await makeOrganization();
+      const otherOrganization = await makeOrganization();
+      const member = await makeUser();
+      await makeMember(member.id, organization.id, { role: "member" });
+
+      const orgServer = await makeMcpServer({
+        scope: "org",
+        organizationId: otherOrganization.id,
+      });
+
+      const servers = await McpServerModel.findAll(
+        member.id,
+        false,
+        organization.id,
+      );
+
+      expect(servers.some((s) => s.id === orgServer.id)).toBe(false);
+    });
+
+    test("findById returns an org-wide server to a member of its organization", async ({
+      makeMcpServer,
+      makeMember,
+      makeOrganization,
+      makeUser,
+    }) => {
+      const organization = await makeOrganization();
+      const member = await makeUser();
+      await makeMember(member.id, organization.id, { role: "member" });
+
+      const orgServer = await makeMcpServer({
+        scope: "org",
+        organizationId: organization.id,
+      });
+
+      const found = await McpServerModel.findById(orgServer.id, member.id);
+      expect(found?.id).toBe(orgServer.id);
+    });
+
+    test("findById returns null for an org-wide server when user is not in its organization", async ({
+      makeMcpServer,
+      makeMember,
+      makeOrganization,
+      makeUser,
+    }) => {
+      const organization = await makeOrganization();
+      const otherOrganization = await makeOrganization();
+      const user = await makeUser();
+      await makeMember(user.id, otherOrganization.id, { role: "member" });
+
+      const orgServer = await makeMcpServer({
+        scope: "org",
+        organizationId: organization.id,
+      });
+
+      const found = await McpServerModel.findById(orgServer.id, user.id);
+      expect(found).toBeNull();
+    });
+
     test("does not duplicate servers when multiple users assigned", async ({
       makeMcpServer,
       makeUser,

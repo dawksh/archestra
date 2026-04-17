@@ -24,6 +24,8 @@ export type PrefetchedMcpServer = {
   ownerId: string | null;
   catalogId: string | null;
   teamId?: string | null;
+  scope?: "personal" | "team" | "org";
+  organizationId?: string | null;
 };
 
 export type AgentToolAssignmentPrefetchedData = {
@@ -297,7 +299,7 @@ export async function validateAssignedMcpServer(params: {
   tool: Tool;
   preFetchedServer?: Pick<
     PrefetchedMcpServer,
-    "id" | "ownerId" | "catalogId" | "teamId"
+    "id" | "ownerId" | "catalogId" | "teamId" | "scope" | "organizationId"
   > | null;
 }): Promise<AgentToolAssignmentError | null> {
   const { agentId, mcpServerId, tool, preFetchedServer } = params;
@@ -368,7 +370,10 @@ async function getAssignmentTargetContext(agentId: string): Promise<{
 }
 
 export async function isMcpServerAssignableToTarget(params: {
-  mcpServer: Pick<PrefetchedMcpServer, "ownerId" | "teamId">;
+  mcpServer: Pick<
+    PrefetchedMcpServer,
+    "ownerId" | "teamId" | "scope" | "organizationId"
+  >;
   target: {
     organizationId: string;
     scope: AgentScope;
@@ -377,6 +382,11 @@ export async function isMcpServerAssignableToTarget(params: {
   };
 }): Promise<boolean> {
   const { mcpServer, target } = params;
+
+  // Org-wide MCP servers are assignable to any agent in the same org
+  if (mcpServer.scope === "org") {
+    return mcpServer.organizationId === target.organizationId;
+  }
 
   if (mcpServer.teamId) {
     return target.scope === "team" && target.teamIds.includes(mcpServer.teamId);

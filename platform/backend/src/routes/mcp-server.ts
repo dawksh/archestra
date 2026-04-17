@@ -65,7 +65,11 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
         { mcpServerInstallation: ["admin"] },
         headers,
       );
-      let allServers = await McpServerModel.findAll(user.id, isMcpServerAdmin);
+      let allServers = await McpServerModel.findAll(
+        user.id,
+        isMcpServerAdmin,
+        organizationId,
+      );
 
       // Filter by catalogId if provided
       if (catalogId) {
@@ -87,6 +91,8 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
                 mcpServer: {
                   ownerId: server.ownerId,
                   teamId: server.teamId,
+                  scope: server.scope,
+                  organizationId: server.organizationId,
                 },
                 target,
               }))
@@ -148,7 +154,7 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
         response: constructResponseSchema(SelectMcpServerSchema),
       },
     },
-    async ({ body, user, headers }, reply) => {
+    async ({ body, user, headers, organizationId }, reply) => {
       let {
         agentIds,
         secretId,
@@ -166,7 +172,34 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
         serverType: "local",
       };
 
-      // Set owner_id and userId to current user
+      // Derive scope from explicit field or existing team/owner inputs
+      const explicitScope = serverData.scope;
+      const resolvedScope = explicitScope
+        ? explicitScope
+        : serverData.teamId
+          ? ("team" as const)
+          : ("personal" as const);
+
+      if (resolvedScope === "team" && !serverData.teamId) {
+        throw new ApiError(400, "teamId is required for team-scoped servers");
+      }
+
+      if (resolvedScope === "org") {
+        const { success: isMcpServerAdmin } = await hasPermission(
+          { mcpServerInstallation: ["admin"] },
+          headers,
+        );
+        if (!isMcpServerAdmin) {
+          throw new ApiError(
+            403,
+            "You don't have permission to create organization-wide MCP server installations",
+          );
+        }
+        serverData.teamId = null;
+      }
+
+      serverData.scope = resolvedScope;
+      serverData.organizationId = organizationId;
       serverData.ownerId = user.id;
       serverData.userId = user.id;
 
@@ -187,7 +220,7 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
         // Playwright browser preview can only be installed as a personal server
         if (
           isPlaywrightCatalogItem(serverData.catalogId) &&
-          serverData.teamId
+          resolvedScope !== "personal"
         ) {
           throw new ApiError(
             400,
@@ -245,9 +278,9 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
 
         // Check for duplicate personal installation (same user, no team)
         // Return existing server instead of erroring (idempotent behavior)
-        if (!serverData.teamId) {
+        if (resolvedScope === "personal") {
           const existingPersonal = existingServers.find(
-            (s) => s.ownerId === user.id && !s.teamId,
+            (s) => s.ownerId === user.id && !s.teamId && s.scope === "personal",
           );
           if (existingPersonal) {
             // If agentIds provided, assign the server's tools to those agents
@@ -267,7 +300,7 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
         }
 
         // Check for duplicate team installation (same team)
-        if (serverData.teamId) {
+        if (resolvedScope === "team" && serverData.teamId) {
           const existingTeam = existingServers.find(
             (s) => s.teamId === serverData.teamId,
           );
@@ -275,6 +308,19 @@ const mcpServerRoutes: FastifyPluginAsyncZod = async (fastify) => {
             throw new ApiError(
               400,
               "This team already has an installation of this MCP server",
+            );
+          }
+        }
+
+        // Check for duplicate org-wide installation (same organization)
+        if (resolvedScope === "org") {
+          const existingOrg = existingServers.find(
+            (s) => s.scope === "org" && s.organizationId === organizationId,
+          );
+          if (existingOrg) {
+            throw new ApiError(
+              400,
+              "This organization already has an installation of this MCP server",
             );
           }
         }

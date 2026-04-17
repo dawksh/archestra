@@ -112,9 +112,59 @@ class McpServerModel {
     return result.length > 0;
   }
 
+  /**
+   * Get all MCP server IDs that are org-wide in an organization.
+   * Any member of the organization can access these servers.
+   */
+  private static async getOrgWideMcpServerIds(
+    organizationId: string,
+  ): Promise<string[]> {
+    const mcpServers = await db
+      .select({ id: schema.mcpServersTable.id })
+      .from(schema.mcpServersTable)
+      .where(
+        and(
+          eq(schema.mcpServersTable.scope, "org"),
+          eq(schema.mcpServersTable.organizationId, organizationId),
+        ),
+      );
+
+    return mcpServers.map((s) => s.id);
+  }
+
+  /**
+   * Check if a specific MCP server is org-wide and the user is a member of its organization.
+   */
+  private static async userHasOrgWideAccess(
+    userId: string,
+    mcpServerId: string,
+  ): Promise<boolean> {
+    const result = await db
+      .select({ id: schema.mcpServersTable.id })
+      .from(schema.mcpServersTable)
+      .innerJoin(
+        schema.membersTable,
+        eq(
+          schema.mcpServersTable.organizationId,
+          schema.membersTable.organizationId,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.mcpServersTable.id, mcpServerId),
+          eq(schema.mcpServersTable.scope, "org"),
+          eq(schema.membersTable.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return result.length > 0;
+  }
+
   static async findAll(
     userId?: string,
     isMcpServerAdmin?: boolean,
+    organizationId?: string,
   ): Promise<McpServer[]> {
     // Single query with LEFT JOINs for all related data including assigned users,
     // eliminating the consecutive DB query for user details.
@@ -162,15 +212,23 @@ class McpServerModel {
       // Get MCP servers accessible through:
       // 1. Team membership (servers assigned to user's teams)
       // 2. Personal access (user's own servers)
-      const [teamAccessibleMcpServerIds, personalMcpServerIds] =
+      // 3. Org-wide servers (scope = 'org' in the user's organization)
+      const [teamAccessibleMcpServerIds, personalMcpServerIds, orgWideIds] =
         await Promise.all([
           McpServerModel.getUserAccessibleMcpServerIdsByTeam(userId),
           McpServerUserModel.getUserPersonalMcpServerIds(userId),
+          organizationId
+            ? McpServerModel.getOrgWideMcpServerIds(organizationId)
+            : Promise.resolve([]),
         ]);
 
       // Combine all lists
       const accessibleMcpServerIds = [
-        ...new Set([...teamAccessibleMcpServerIds, ...personalMcpServerIds]),
+        ...new Set([
+          ...teamAccessibleMcpServerIds,
+          ...personalMcpServerIds,
+          ...orgWideIds,
+        ]),
       ];
 
       if (accessibleMcpServerIds.length === 0) {
@@ -237,12 +295,14 @@ class McpServerModel {
   ): Promise<McpServer | null> {
     // Check access control for non-MCP server admins
     if (userId && !isMcpServerAdmin) {
-      const [hasTeamAccess, hasPersonalAccess] = await Promise.all([
-        McpServerModel.userHasMcpServerAccessByTeam(userId, id),
-        McpServerUserModel.userHasPersonalMcpServerAccess(userId, id),
-      ]);
+      const [hasTeamAccess, hasPersonalAccess, hasOrgWideAccess] =
+        await Promise.all([
+          McpServerModel.userHasMcpServerAccessByTeam(userId, id),
+          McpServerUserModel.userHasPersonalMcpServerAccess(userId, id),
+          McpServerModel.userHasOrgWideAccess(userId, id),
+        ]);
 
-      if (!hasTeamAccess && !hasPersonalAccess) {
+      if (!hasTeamAccess && !hasPersonalAccess && !hasOrgWideAccess) {
         return null;
       }
     }

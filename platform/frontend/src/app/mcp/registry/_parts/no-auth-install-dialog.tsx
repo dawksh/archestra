@@ -13,6 +13,8 @@ type CatalogItem =
 export interface NoAuthInstallResult {
   /** Team ID to assign the MCP server to (null for personal) */
   teamId?: string | null;
+  /** Installation scope: personal | team | org */
+  scope?: "personal" | "team" | "org";
 }
 
 interface NoAuthInstallDialogProps {
@@ -37,14 +39,21 @@ export function NoAuthInstallDialog({
   personalOnly = false,
 }: NoAuthInstallDialogProps) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [credentialType, setCredentialType] = useState<
+    "personal" | "team" | "org"
+  >("personal");
   const [canInstall, setCanInstall] = useState(true);
 
   const handleInstall = useCallback(async () => {
-    await onInstall({ teamId: selectedTeamId });
-  }, [onInstall, selectedTeamId]);
+    await onInstall({
+      teamId: credentialType === "team" ? selectedTeamId : null,
+      scope: credentialType,
+    });
+  }, [onInstall, selectedTeamId, credentialType]);
 
   const handleClose = useCallback(() => {
     setSelectedTeamId(null);
+    setCredentialType("personal");
     onClose();
   }, [onClose]);
 
@@ -88,6 +97,7 @@ export function NoAuthInstallDialog({
         onTeamChange={setSelectedTeamId}
         catalogId={catalogItem.id}
         onCanInstallChange={setCanInstall}
+        onCredentialTypeChange={setCredentialType}
         preselectedTeamId={preselectedTeamId}
         personalOnly={personalOnly}
       />

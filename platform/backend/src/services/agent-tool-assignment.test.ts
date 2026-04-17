@@ -199,6 +199,77 @@ describe("validateCredentialSource", () => {
     });
   });
 
+  test("accepts an org-scoped MCP server for any agent in the same organization", async ({
+    makeAgent,
+    makeInternalMcpCatalog,
+    makeMcpServer,
+    makeMember,
+    makeOrganization,
+    makeTool,
+    makeUser,
+  }) => {
+    const organization = await makeOrganization();
+    const author = await makeUser();
+    await makeMember(author.id, organization.id, { role: "member" });
+
+    const agent = await makeAgent({
+      organizationId: organization.id,
+      authorId: author.id,
+      scope: "personal",
+    });
+    const catalog = await makeInternalMcpCatalog({ serverType: "remote" });
+    const tool = await makeTool({ catalogId: catalog.id, name: "remote_tool" });
+    const mcpServer = await makeMcpServer({
+      scope: "org",
+      organizationId: organization.id,
+      catalogId: catalog.id,
+    });
+
+    const result = await validateCredentialSource({
+      agentId: agent.id,
+      mcpServerId: mcpServer.id,
+      toolId: tool.id,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  test("rejects an org-scoped MCP server for an agent in a different organization", async ({
+    makeAgent,
+    makeInternalMcpCatalog,
+    makeMcpServer,
+    makeMember,
+    makeOrganization,
+    makeTool,
+    makeUser,
+  }) => {
+    const organization = await makeOrganization();
+    const otherOrganization = await makeOrganization();
+    const author = await makeUser();
+    await makeMember(author.id, organization.id, { role: "member" });
+
+    const agent = await makeAgent({
+      organizationId: organization.id,
+      authorId: author.id,
+      scope: "personal",
+    });
+    const catalog = await makeInternalMcpCatalog({ serverType: "remote" });
+    const tool = await makeTool({ catalogId: catalog.id, name: "remote_tool" });
+    const mcpServer = await makeMcpServer({
+      scope: "org",
+      organizationId: otherOrganization.id,
+      catalogId: catalog.id,
+    });
+
+    const result = await validateCredentialSource({
+      agentId: agent.id,
+      mcpServerId: mcpServer.id,
+      toolId: tool.id,
+    });
+
+    expect(result).not.toBeNull();
+  });
+
   test("accepts a personal credential for a team-scoped resource when the owner is a team member", async ({
     makeAgent,
     makeInternalMcpCatalog,

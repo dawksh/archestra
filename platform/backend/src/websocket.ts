@@ -617,6 +617,7 @@ class WebSocketService {
     const allServers = await McpServerModel.findAll(
       clientContext.userId,
       clientContext.userIsMcpServerAdmin,
+      clientContext.organizationId,
     );
 
     // Filter to local servers only (remote servers don't have K8s deployments)
